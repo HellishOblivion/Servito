@@ -1,5 +1,6 @@
 package org.servito.net;
 
+import org.servito.utils.Buffer;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.ServerSocket;
@@ -17,14 +18,14 @@ public class Server {
     private int backlog;
     private int nextConnectionID;
     private int readersDelay;
+    private int packetMaxLength;
     private int workers;
     private ServerSocket serverSocket;
     private PrintStream errorStream;
     private Protocol protocol;
-    private BlockingQueue<Packet> buffer;
-    private BlockingQueue<Integer> connectionsToRemove;
-    private List<Connection> connections;
-    @SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
+    private Buffer<Packet> buffer;
+    private Buffer<Integer> connectionsToRemove;
+    private final List<Connection> connections;
     private List<Thread> readers;
     private Thread newConnectionListener;
     private Thread deadConnectionEliminator;
@@ -34,34 +35,34 @@ public class Server {
     private boolean connectionAutoFlush;
 
 
-    public Server(int port, int bufferSize, int maxConnections, int backlog, int readersDelay, int workers,
-                  boolean connectionAutoFlush, PrintStream errorStream, Protocol protocol){
+    public Server(int port, int bufferSize, int maxConnections, int backlog, int packetMaxLength, int readersDelay,
+                  int workers, boolean connectionAutoFlush, PrintStream errorStream, Protocol protocol){
         if(port < 0 || port > 65535) throw new IllegalArgumentException();
         this.port = port;
         this.backlog = backlog;
         this.maxConnections = maxConnections;
         this.nextConnectionID = 0;
+        this.packetMaxLength =
         this.readersDelay = readersDelay;
         if(workers < 1) throw new IllegalArgumentException();
         this.workers = workers;
         this.errorStream = errorStream;
         this.protocol = protocol;
         this.protocol.onServerConstructor(this);
-        buffer = new BlockingQueue<>(bufferSize);
-        connectionsToRemove = new BlockingQueue<>(backlog);
+        buffer = new Buffer<>(bufferSize);
+        connectionsToRemove = new Buffer<>(backlog);
         connections = new ArrayList<>();
         readers = new ArrayList<>();
-        newConnectionListener = makeConnectionListener();
-        deadConnectionEliminator = makeConnectionEliminator();
+        makeConnectionListener();
+        makeConnectionEliminator();
         dataProcessors = new ArrayList<>();
-        for(int i = 0; i < workers; i++) dataProcessors.add(makeDataProcessor());
         asyncTaskManager = new AsyncTaskManager();
         this.connectionAutoFlush = connectionAutoFlush;
         protocol.init();
     }
 
-    private Thread makeConnectionListener() {
-        return new Thread(() -> {
+    private void makeConnectionListener() {
+        newConnectionListener = new Thread(() -> {
             while(keepWorking) {
                 try {
                     Socket connection0 = serverSocket.accept();
@@ -89,8 +90,8 @@ public class Server {
         });
     }
 
-    private Thread makeConnectionEliminator() {
-        return new Thread(() -> {
+    private void makeConnectionEliminator() {
+        deadConnectionEliminator =  new Thread(() -> {
             while(keepWorking) {
                 try {
                     int id = connectionsToRemove.dequeue();
@@ -99,8 +100,8 @@ public class Server {
                     Connection connection = connections.get(index);
                     removeConnection(index);
                     asyncTaskManager.startNewTask("elimination" + connection.getId(), false, () -> {
-                        protocol.onDeadConnection(connection);
                         connection.close();
+                        protocol.onDeadConnection(connection);
                     }, (e) -> false);
                 } catch(InterruptedException e) {
                     return;
@@ -109,17 +110,18 @@ public class Server {
         });
     }
 
-    private Thread makeDataProcessor() {
-        return new Thread(() -> {
-            while(keepWorking) {
-                try {
-                    Packet packet = buffer.dequeue();
-                    protocol.onDataInBuffer(packet);
-                } catch(InterruptedException e){
-                    return;
+    private void makeDataProcessor() {
+        for(int i = 0; i < workers; i++) dataProcessors.add(
+            new Thread(() -> {
+                while(keepWorking) {
+                    try {
+                        Packet packet = buffer.dequeue();
+                        protocol.onDataInBuffer(packet);
+                    } catch(InterruptedException e) {
+                        return;
+                    }
                 }
-            }
-        });
+        }));
     }
 
     public void start() {
@@ -129,11 +131,15 @@ public class Server {
             e.printStackTrace(errorStream);
         }
         keepWorking = true;
+        makeConnectionListener();
+        makeConnectionEliminator();
+        makeDataProcessor();
         newConnectionListener.start();
         deadConnectionEliminator.start();
         for (Thread thread : dataProcessors) {
             thread.start();
         }
+        protocol.onStart();
     }
 
     public void stop() {
@@ -147,20 +153,21 @@ public class Server {
         for (Thread thread : dataProcessors) {
             thread.interrupt();
         }
+        asyncTaskManager.stopAllTasks(false);
+        readers.clear();
+        for (Connection connection : connections) {
+            connection.close();
+        }
+        connections.clear();
     }
 
     public void close() {
         stop();
-        try {
-            serverSocket.close();
-            readers.clear();
-            for (Connection connection : connections) {
-                connection.close();
-            }
-            connections.clear();
-        } catch(IOException e) {
-            e.printStackTrace(errorStream);
+        readers.clear();
+        for (Connection connection : connections) {
+            connection.close();
         }
+        connections.clear();
     }
 
     public boolean isWorking() {
@@ -183,42 +190,23 @@ public class Server {
         return asyncTaskManager;
     }
 
-    public void send(String data) {
+    public void send(byte[] data) {
         for (Connection connection : connections) {
-            connection.send(data);
-        }
-    }
-
-    public void sendTo(String data, Connection... connections) {
-        for (Connection connection : connections) {
-            connection.send(data);
-        }
-    }
-
-    @SuppressWarnings("SynchronizeOnNonFinalField")
-    private void addConnection(Connection connection) {
-        Thread reader = new Thread(() -> {
-            while(true) {
+            try {
+                connection.write(data);
+            } catch(IOException e) {
                 try {
-                    StringBuilder content = new StringBuilder();
-                    char nextChar;
-                    while(true) {
-                        nextChar = (char)connection.read();
-                        if(nextChar == (char)65535) throw new IOException();
-                        else if(nextChar != protocol.getEndChar()) content.append(nextChar);
-                        else break;
-                    }
-                    Packet packet = new Packet(connection, content.toString());
-                    buffer.enqueue(packet);
-                    Thread.sleep(readersDelay);
-                } catch(IOException e) {
-                    try {
-                        connectionsToRemove.enqueue(connection.getId());
-                        return;
-                    } catch(InterruptedException exc) {}
-                } catch(InterruptedException e) {}
+                    connectionsToRemove.enqueue(connection.getId());
+                } catch(InterruptedException exc) {
+                    //Not necessary handling
+                }
             }
-        });
+        }
+    }
+
+    private void addConnection(Connection connection) {
+        AsyncReader reader = new AsyncReader(connection, buffer, connectionsToRemove,
+                protocol.getEndValue(), packetMaxLength, readersDelay);
         synchronized (connections) {
             reader.start();
             connections.add(connection);
@@ -226,9 +214,9 @@ public class Server {
         }
     }
 
-    @SuppressWarnings("SynchronizeOnNonFinalField")
     private void removeConnection(int index) {
         synchronized (connections) {
+            readers.get(index).interrupt();
             readers.remove(index);
             connections.remove(index);
         }

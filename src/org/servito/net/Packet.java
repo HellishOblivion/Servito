@@ -3,9 +3,9 @@ package org.servito.net;
 public class Packet {
 
     private Connection connection;
-    private String content;
+    private byte[] content;
 
-    Packet(Connection connection, String content) {
+    Packet(Connection connection, byte[] content) {
         this.connection = connection;
         this.content = content;
     }
@@ -14,7 +14,7 @@ public class Packet {
         return connection;
     }
 
-    public String getContent() {
+    public byte[] getContent() {
         return content;
     }
 

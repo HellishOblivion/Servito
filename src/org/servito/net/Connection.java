@@ -9,39 +9,31 @@ public class Connection implements Closeable {
 
     private int id;
     private Socket socket;
-    private InputStreamReader in;
-    private BufferedReader stringIn;
-    private PrintWriter out;
-    private BufferedOutputStream dataOut;
+    private DataInputStream in;
+    private DataOutputStream out;
     private HashMap<String, String> properties = new HashMap<>();
     private boolean autoFlush;
 
     Connection(int id, Socket socket, boolean autoFlush) throws IOException{
         this.socket = socket;
         this.id = id;
-        in = new InputStreamReader(socket.getInputStream());
-        stringIn = new BufferedReader(in);
-        out = new PrintWriter(socket.getOutputStream());
-        dataOut = new BufferedOutputStream(socket.getOutputStream());
+        in = new DataInputStream(socket.getInputStream());
+        out = new DataOutputStream(socket.getOutputStream());
         this.autoFlush = autoFlush;
     }
 
     public void flush() throws IOException {
         out.flush();
-        dataOut.flush();
+        out.flush();
     }
 
-    public synchronized void send(String data) {
-        out.println(data);
+    public synchronized void write(byte[] data) throws IOException {
+        out.write(data);
         if(autoFlush) out.flush();
     }
 
-    public int read() throws IOException{
-        return in.read();
-    }
-
-    public String readLine() throws IOException {
-        return stringIn.readLine();
+    public byte read() throws IOException{
+        return in.readByte();
     }
 
     @Override
@@ -51,8 +43,9 @@ public class Connection implements Closeable {
             socket.close();
             in.close();
             out.close();
-            dataOut.close();
-        } catch(IOException e) {}
+        } catch(IOException e) {
+            //Not necessary handling
+        }
     }
 
     public int getId() {

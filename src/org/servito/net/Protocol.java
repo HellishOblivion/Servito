@@ -1,19 +1,19 @@
 package org.servito.net;
 
-@SuppressWarnings({"WeakerAccess", "unused"})
+
 public abstract class Protocol {
 
-    private char endChar;
+    private byte endValue;
     private Server server;
 
-    public Protocol(char endChar) {
-        this.endChar = endChar;
+    public Protocol(byte endValue) {
+        this.endValue = endValue;
     }
 
-    protected char getEndChar() {
-        return endChar;
+    protected final byte getEndValue() {
+        return endValue;
     }
-    protected Server getServer() {
+    protected final Server getServer() {
         return server;
     }
     void onServerConstructor(Server server){
@@ -22,8 +22,6 @@ public abstract class Protocol {
     protected void init() {}
     protected void onStart() {}
     protected void onStop() {}
-    protected void onResume() {}
-    protected void onClose() {}
     protected abstract boolean onNewConnection(Connection connection);
     protected abstract void onDeadConnection(Connection connection);
     protected abstract void onDataInBuffer(Packet packet);
