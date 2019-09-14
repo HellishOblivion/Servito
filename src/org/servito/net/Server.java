@@ -10,7 +10,6 @@ import java.util.Collections;
 import java.util.List;
 
 
-
 public class Server {
 
     private int port;
@@ -18,7 +17,7 @@ public class Server {
     private int backlog;
     private int nextConnectionID;
     private int readersDelay;
-    private int packetMaxLength;
+    private int maxPacketLength;
     private int workers;
     private ServerSocket serverSocket;
     private PrintStream errorStream;
@@ -35,14 +34,14 @@ public class Server {
     private boolean connectionAutoFlush;
 
 
-    public Server(int port, int bufferSize, int maxConnections, int backlog, int packetMaxLength, int readersDelay,
+    public Server(int port, int bufferSize, int maxConnections, int backlog, int maxPacketLength, int readersDelay,
                   int workers, boolean connectionAutoFlush, PrintStream errorStream, Protocol protocol){
         if(port < 0 || port > 65535) throw new IllegalArgumentException();
         this.port = port;
         this.backlog = backlog;
         this.maxConnections = maxConnections;
         this.nextConnectionID = 0;
-        this.packetMaxLength =
+        this.maxPacketLength = maxPacketLength;
         this.readersDelay = readersDelay;
         if(workers < 1) throw new IllegalArgumentException();
         this.workers = workers;
@@ -70,7 +69,8 @@ public class Server {
                     asyncTaskManager.startNewTask("accepting" + nextConnectionID, false, () -> {
                         Connection connection;
                         try {
-                            connection = new Connection(nextConnectionID, connection0, connectionAutoFlush);
+                            connection = new Connection(nextConnectionID, connection0, connectionAutoFlush,
+                                    protocol.getEndValue(), maxPacketLength);
                         } catch(IOException e){
                             e.printStackTrace(errorStream);
                             return;
@@ -205,8 +205,7 @@ public class Server {
     }
 
     private void addConnection(Connection connection) {
-        AsyncReader reader = new AsyncReader(connection, buffer, connectionsToRemove,
-                protocol.getEndValue(), packetMaxLength, readersDelay);
+        AsyncReader reader = new AsyncReader(connection, buffer, connectionsToRemove, readersDelay);
         synchronized (connections) {
             reader.start();
             connections.add(connection);
