@@ -1,8 +1,12 @@
 package org.servito.net;
 
-import java.io.*;
+import java.io.Closeable;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.net.Socket;
 import java.util.HashMap;
+import java.util.Map;
 
 
 public class Connection implements Closeable {
@@ -11,7 +15,7 @@ public class Connection implements Closeable {
     private Socket socket;
     private DataInputStream in;
     private DataOutputStream out;
-    private HashMap<String, String> properties = new HashMap<>();
+    private Map<String, Object> properties = new HashMap<>();
     private boolean autoFlush;
 
     Connection(int id, Socket socket, boolean autoFlush) throws IOException{
@@ -23,7 +27,6 @@ public class Connection implements Closeable {
     }
 
     public void flush() throws IOException {
-        out.flush();
         out.flush();
     }
 
@@ -56,7 +59,7 @@ public class Connection implements Closeable {
         return socket.getInetAddress().getHostAddress();
     }
 
-    public String getProperty(String key) {
+    public Object getProperty(String key) {
         return properties.get(key);
     }
 
